@@ -17,6 +17,12 @@ from swarm_protocol.contracts import (
 )
 from swarm_protocol.ros import main_node, publish, runtime_path
 from swarm_protocol.storage import ProcessLock
+from swarm_protocol.topics import (
+    DEFAULT_CLUSTER_ID,
+    DEFAULT_PEER_PREFIX,
+    DEFAULT_PLATFORM_PREFIX,
+    heartbeat_topic,
+)
 
 
 class TransportNode(Node):
@@ -24,16 +30,15 @@ class TransportNode(Node):
         super().__init__("swarm_mqtt_transport")
         for key, value in [
             ("robot_id", ""),
-            ("cluster_id", "swarm-local"),
+            ("cluster_id", DEFAULT_CLUSTER_ID),
             ("mqtt_host", "127.0.0.1"),
             ("mqtt_port", 1883),
             ("mqtt_username", ""),
             ("mqtt_password", ""),
             ("mqtt_tls", False),
             ("mqtt_ca", ""),
-            ("allow_insecure_remote", False),
-            ("platform_prefix", "fh/swarm/dev/dispatch"),
-            ("mqtt_prefix", "fh/swarm/v1"),
+            ("platform_prefix", DEFAULT_PLATFORM_PREFIX),
+            ("mqtt_prefix", DEFAULT_PEER_PREFIX),
         ]:
             self.declare_parameter(key, value)
         get = lambda name: self.get_parameter(name).value
@@ -44,14 +49,6 @@ class TransportNode(Node):
         self.prefix = get("mqtt_prefix").rstrip("/") + "/" + self.cluster
         self.platform = get("platform_prefix").rstrip("/")
         host = get("mqtt_host")
-        if (
-            host not in {"localhost", "127.0.0.1", "::1"}
-            and not get("mqtt_tls")
-            and not get("allow_insecure_remote")
-        ):
-            raise ValueError(
-                "remote MQTT requires TLS (or explicit development override)"
-            )
         self.lock = ProcessLock(runtime_path(self, "transport") / "process.lock")
         self.boot = uuid.uuid4().hex
         self.connected = False
@@ -182,7 +179,7 @@ class TransportNode(Node):
             if channel not in {"events", "services_reply", "state", "heartbeat"}:
                 raise ValueError("unsupported platform channel")
             topic = (
-                "fh/device/" + self.robot + "/fleet/heartbeat"
+                heartbeat_topic(self.robot)
                 if channel == "heartbeat"
                 else self.platform + "/" + channel
             )
