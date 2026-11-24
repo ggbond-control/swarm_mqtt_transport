@@ -6,4 +6,4 @@
 
 控制与图片使用独立 MQTT 连接、主题和有界队列；图片不进入共识日志。控制优先，断连不缓存临时许可，业务 outbox 与 Raft 负责重传。网络中断时不能靠传输层绕过固定多数派。
 
-连接按 `mqtt_tls`／`mqtt_ca` 使用 TLS 或明文，不再需要额外 `allow_insecure_remote` 许可；TLS 仍校验 CA／证书。不要把真实密码写进版本化配置。配置、协议和运行边界见 [协调器 README](../swarm_mission_coordinator/README.md) 和 [PROTOCOL](../swarm_mission_coordinator/PROTOCOL.md)，测试见 [TEST_LOG](TEST_LOG.md)。
+连接按 `mqtt_tls`／`mqtt_ca` 使用 TLS 或明文，不再需要额外 `allow_insecure_remote` 许可；TLS 仍校验 CA／证书。不要把真实密码写进版本化配置。配置、协议和运行边界见 [协调器 README](../swarm_mission_coordinator/README.md)，测试见 [TEST_LOG](TEST_LOG.md)。

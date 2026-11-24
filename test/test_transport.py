@@ -76,6 +76,7 @@ def test_disconnected_outbound_is_not_queued_as_future_permit():
     relay = SimpleNamespace(
         connected=False,
         client=SimpleNamespace(publish=lambda *args, **kw: sent.append((args, kw))),
+        audit=Mock(),
     )
     TransportNode.send(relay, "t", {"kind": "permit_grant"})
     assert not sent
@@ -117,6 +118,7 @@ def test_remote_broker_needs_no_extra_permission_and_tls_keeps_certificate_check
         "mqtt_password": "test-password",
     }
     monkeypatch.setattr(Node, "__init__", lambda *args, **kw: None)
+    monkeypatch.setattr(Node, "get_logger", lambda *args: Mock())
     monkeypatch.setattr(
         Node, "declare_parameter", lambda self, k, v: params.setdefault(k, v)
     )
@@ -127,6 +129,7 @@ def test_remote_broker_needs_no_extra_permission_and_tls_keeps_certificate_check
         monkeypatch.setattr(Node, name, lambda *args, **kw: Mock())
     monkeypatch.setattr(transport_module, "runtime_path", lambda *args: tmp_path)
     monkeypatch.setattr(transport_module, "ProcessLock", lambda *args: Mock())
+    monkeypatch.setattr(transport_module, "Audit", lambda *args: Mock())
     control, media = Mock(), Mock()
     monkeypatch.setattr(
         transport_module.mqtt, "Client", Mock(side_effect=[control, media])

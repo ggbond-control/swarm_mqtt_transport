@@ -7,6 +7,7 @@ import uuid
 import paho.mqtt.client as mqtt
 from rclpy.node import Node
 from std_msgs.msg import String
+from swarm_protocol.audit import Audit
 from swarm_protocol.contracts import (
     MAX_MESSAGE_BYTES,
     canonical,
@@ -49,7 +50,9 @@ class TransportNode(Node):
         self.prefix = get("mqtt_prefix").rstrip("/") + "/" + self.cluster
         self.platform = get("platform_prefix").rstrip("/")
         host = get("mqtt_host")
-        self.lock = ProcessLock(runtime_path(self, "transport") / "process.lock")
+        root = runtime_path(self, "transport")
+        self.lock = ProcessLock(root / "process.lock")
+        self.audit = Audit(root, self.robot, self.get_logger())
         self.boot = uuid.uuid4().hex
         self.connected = False
         self.media_connected = False
@@ -64,28 +67,18 @@ class TransportNode(Node):
         )
         self.client.max_queued_messages_set(256)
         self.client.max_inflight_messages_set(20)
-        self.client.reconnect_delay_set(1, 10)
-        if get("mqtt_username"):
-            self.client.username_pw_set(get("mqtt_username"), get("mqtt_password"))
-        if get("mqtt_tls"):
-            self.client.tls_set(
-                ca_certs=get("mqtt_ca") or None, cert_reqs=ssl.CERT_REQUIRED
-            )
         self.media_client = mqtt.Client(
             client_id=f"swarm-media-{self.cluster}-{self.robot}-{self.boot[:10]}",
             clean_session=True,
         )
         self.media_client.max_queued_messages_set(4)
         self.media_client.max_inflight_messages_set(1)
-        self.media_client.reconnect_delay_set(1, 10)
-        if get("mqtt_username"):
-            self.media_client.username_pw_set(
-                get("mqtt_username"), get("mqtt_password")
-            )
-        if get("mqtt_tls"):
-            self.media_client.tls_set(
-                ca_certs=get("mqtt_ca") or None, cert_reqs=ssl.CERT_REQUIRED
-            )
+        for client in (self.client, self.media_client):
+            client.reconnect_delay_set(1, 10)
+            if get("mqtt_username"):
+                client.username_pw_set(get("mqtt_username"), get("mqtt_password"))
+            if get("mqtt_tls"):
+                client.tls_set(ca_certs=get("mqtt_ca") or None, cert_reqs=ssl.CERT_REQUIRED)
         self.media_client.on_connect = self.media_connect
         self.media_client.on_disconnect = lambda *args: setattr(
             self, "media_connected", False
@@ -113,6 +106,7 @@ class TransportNode(Node):
 
     def connect(self, client, userdata, flags, rc):
         self.connected = rc == 0
+        self.audit.record("mqtt_connect", {"result": rc})
         if self.connected:
             for topic in [
                 self.prefix + "/broadcast/+",
@@ -132,6 +126,7 @@ class TransportNode(Node):
 
     def disconnect(self, client, userdata, rc):
         self.connected = False
+        self.audit.record("mqtt_disconnect", {"result": rc})
 
     def message(self, client, userdata, msg):
         if len(msg.payload) > MAX_MESSAGE_BYTES or msg.retain:
@@ -190,9 +185,19 @@ class TransportNode(Node):
     def send(self, topic, value):
         if self.connected:
             raw = canonical(value)
-            if len(raw.encode()) > MAX_MESSAGE_BYTES:
+            size = len(raw.encode())
+            if size > MAX_MESSAGE_BYTES:
                 raise ValueError("message too large")
             self.client.publish(topic, raw, qos=1, retain=False)
+            if value.get("kind") not in {"hello", "raft"} and not topic.endswith("/heartbeat"):
+                data = value.get("data", {})
+                if not isinstance(data, dict):
+                    data = {}
+                self.audit.record("mqtt_out", {
+                    "topic": topic, "bytes": size, "kind": value.get("kind"),
+                    "method": value.get("method"), "round_epoch": value.get("round_epoch", data.get("round_epoch", 0)),
+                    "revision": value.get("plan_revision", data.get("plan_revision", 0)),
+                })
 
     def drain_media(self):
         try:
@@ -237,6 +242,7 @@ class TransportNode(Node):
         self.media_client.loop_stop()
         self.client.disconnect()
         self.client.loop_stop()
+        self.audit.close()
         self.lock.close()
         return super().destroy_node()
 
